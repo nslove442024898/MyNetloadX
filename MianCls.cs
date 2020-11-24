@@ -40,42 +40,26 @@ namespace MyNetloadX
         {
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
             Autodesk.AutoCAD.Windows.OpenFileDialog ofd = new Autodesk.AutoCAD.Windows.OpenFileDialog("Dll加载到内存并卸载", "Dll加载到内存并卸载", "dll", "Dll加载到内存并卸载", Autodesk.AutoCAD.Windows.OpenFileDialog.OpenFileDialogFlags.AllowMultiple);
-            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
+            //        而其中最重要的是这个事件: 运行域事件它会在运行的时候找已经载入内存上面的程序集.
+            AppDomain.CurrentDomain.AssemblyResolve += RunTimeCurrentDomain.DefaultAssemblyResolve;
+
             if (ofd.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                foreach (var item in ofd.GetFilenames())
+                foreach (var dllpath in ofd.GetFilenames())
                 {
-                    var _cadAppAssemblie = AppDomain.CurrentDomain.GetAssemblies();
-                    var verCurLoad = MyHelper.GetFileVersionCe(item);
-                    var alreadyLoad = listDllInfo.Where(c => c[0] == Path.GetFileNameWithoutExtension(item)).ToList();
-                    DependentAssembly dependentAssembly = new DependentAssembly(item);
-                    if (alreadyLoad.Count == 0)
+                    //come from JJ
+                    var ad = new AssemblyDependent(dllpath);
+                    var msg = ad.Load();
+                    bool allyes = true;
+                    foreach (var item in msg)
                     {
-                        dependentAssembly.Load();
-                        Application.ShowAlertDialog($"首次加载{Path.GetFileNameWithoutExtension(item)} ====> File Version {verCurLoad.ToString()} 成功！！");
-                        listDllInfo.Add(new string[] { Path.GetFileNameWithoutExtension(item), verCurLoad.ToString() });
-                    }
-                    else
-                    {
-                        StringBuilder sb = new StringBuilder();
-                        bool flag = false;
-                        for (int i = 0; i < alreadyLoad.Count; i++)
+                        if (!item.LoadYes)
                         {
-                            if (alreadyLoad[i][1] == verCurLoad.ToString())
-                            {
-                                Application.ShowAlertDialog($"{alreadyLoad[i][0]},{alreadyLoad[i][1]} 已经在程序中，如需覆盖加载请修改dll的 Assembly FileVersion！！");
-                                flag = true;
-                            }
-                            else sb.AppendLine(alreadyLoad[i][1]);
-                        }
-                        if (flag == false)
-                        {
-                            dependentAssembly.Load();
-                            Application.ShowAlertDialog($"覆盖加载 {Path.GetFileNameWithoutExtension(item)} 成功！！加载的版本为{verCurLoad.ToString()},以下版本不再可用了\n" + sb.ToString());
-                            listDllInfo.Add(new string[] { Path.GetFileNameWithoutExtension(item), verCurLoad.ToString() });
+                            Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage(Environment.NewLine + "**" + item.Path +Environment.NewLine + "**此文件已加载过,重复名称,重复版本号,本次不加载!" +Environment.NewLine);
+                            allyes = false;
                         }
                     }
-
+                    if (allyes) Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage(Environment.NewLine + "**链式加载成功!" + Environment.NewLine);
                 }
             }
             else Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog("请选择一个或者多个dll文件！");
@@ -195,7 +179,7 @@ namespace MyNetloadX
                 myNetLoader.SetValue("MANAGED", 1, Microsoft.Win32.RegistryValueKind.DWord);
                 Application.ShowAlertDialog(Path.GetFileNameWithoutExtension(assName) + "程序自动加载完成，重启AutoCAD 生效！");
             }
-            else Application.ShowAlertDialog(Path.GetFileNameWithoutExtension(assName) + "程序已经启动！欢迎使用");
+            //else Application.ShowAlertDialog(Path.GetFileNameWithoutExtension(assName) + "程序已经启动！欢迎使用");
 
         }
 

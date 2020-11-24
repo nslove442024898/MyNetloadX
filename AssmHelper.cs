@@ -37,201 +37,180 @@ namespace MyNetloadX
         }
     }
 
-    public class DependentAssembly
+    public class AssemblyDependent
     {
-        static string _location;
-        static string _loadPath;
-        static Assembly[] _cadAppAssemblie;
-        static string _dllFile;
+        string _dllFile;
+        /// <summary>
+        /// cad程序域依赖_内存区(不可以卸载)
+        /// </summary>
+        private Assembly[] _cadAs;
+
+        /// <summary>
+        /// cad程序域依赖_映射区(不可以卸载)
+        /// </summary>
+        private Assembly[] _cadAsRef;
+
+        /// <summary>
+        /// 当前域加载事件
+        /// </summary>
+        public event ResolveEventHandler CurrentDomainAssemblyResolveEvent;
 
         /// <summary>
         /// 加载dll的和相关的依赖
         /// </summary>
         /// <param name="dllFile"></param>
-        public DependentAssembly(string dllFile)
+        public AssemblyDependent(string dllFile)
         {
             _dllFile = dllFile;
+
             //cad程序集的依赖
-            _cadAppAssemblie = AppDomain.CurrentDomain.GetAssemblies();
+            _cadAs = AppDomain.CurrentDomain.GetAssemblies();
 
-            //这里是有关CLR的Assembly的搜索路径的过程,
-            //插件目录 "G:\\K01.惊惊连盒\\net35"
-            _location = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            //映射区
+            _cadAsRef = AppDomain.CurrentDomain.ReflectionOnlyGetAssemblies();
 
-            //拖拉文件的路径 "D:\\桌面\\若海的\\test2\\bin\\Debug"
-            _loadPath = Path.GetDirectoryName(_dllFile);
-
-            //运行时靠事件来解决问题,见博客--记得反注释
-            //AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
-        }
-
-        /// <summary>
-        /// 依赖的dll列表
-        /// </summary>
-        public FileAndDependentAssemblyList[] AssemblyList()
-        {
-            BuildDependentAssemblyList(_dllFile, null);
-            return _fadaList.ToArray();//数组0后面跟的就是数组0的引用
-        }
-
-        //dll引用表,数组[1]就是[0]的引用
-        static readonly List<FileAndDependentAssemblyList> _fadaList = new List<FileAndDependentAssemblyList>();
-        // 储存dll的引用
-        string _sourceFile;
-        // 每次递归的临时对象
-        static AssemblyName _assemblyName;
-
-        /// <summary>
-        /// 链式查找依赖的dll
-        /// </summary>
-        /// <param name="pa">dll文件路径</param>
-        /// <param name="dlls">首次为null</param>
-        /// <returns>返回在_fadaList集合上</returns>
-        void BuildDependentAssemblyList(string pa, FileAndDependentAssemblyList dlls)
-        {
-            if (dlls == null)
+            //运行时出错的话,就靠这个事件来解决
+            if (CurrentDomainAssemblyResolveEvent != null)
             {
-                dlls = new FileAndDependentAssemblyList();
-            }
-
-            // 是否已经包含这个路径的程序了
-            if (dlls.Dependent.Contains(pa))
-                return;
-
-            bool reflectionOnlyLoad = true;
-            bool addlies = true;
-            Assembly asm = null;
-
-            // 路径 || 程序名
-            if ((pa.IndexOf(Path.DirectorySeparatorChar, 0, pa.Length) != -1) ||
-                (pa.IndexOf(Path.AltDirectorySeparatorChar, 0, pa.Length) != -1))
-            {
-                dlls = new FileAndDependentAssemblyList(pa, _sourceFile);
-                _sourceFile = pa;
-                // 从这个路径加载程序集,路径
-                asm = Assembly.ReflectionOnlyLoadFrom(pa);
+                AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolveEvent;
             }
             else
             {
-                //判断cad程序集中是否存在,dll的依赖,不存在则搜索拖拉路径的dll,
-                //如果已经存在cad程序集上面就直接加载就可以了 
-                //(cad程序集的依赖)和(加载的dll程序集的依赖)不一样,就加载,并加入集合,==0直接加载
-                if (_cadAppAssemblie.Count(c => c.FullName == pa) == 0)
-                {
-                    var asdl = _assemblyName.Name + ".dll";
-                    string path1 = Path.Combine(_location, asdl);
-                    string path2 = Path.Combine(_loadPath, asdl);
-                    //如果插件目录和拖拉目录都有,那么拖拉目录会覆盖前面
-                    reflectionOnlyLoad = LoadFrom(path1, ref dlls, ref asm, ref addlies);
-                    reflectionOnlyLoad = LoadFrom(path2, ref dlls, ref asm, ref addlies);
-                }
-                if (reflectionOnlyLoad)
-                {
-                    addlies = false;
-                    dlls.Dependent.Add(pa);
-                    // 反射加载上下文,但不能执行程序集
-                    asm = Assembly.ReflectionOnlyLoad(pa);
-                }
-            }
-
-            if (asm == null)
-            {
-                return;
-            }
-
-            //如果包含的话,表示要插入到这个dll下的 
-            if (addlies)
-            {
-                _fadaList.Add(dlls);
-            }
-
-            // 遍历依赖(所有的引用)，并进行递归
-            var asms = asm.GetReferencedAssemblies();
-            foreach (AssemblyName item in asms)
-            {
-                _assemblyName = item;
-                BuildDependentAssemblyList(item.FullName, dlls);
+                AppDomain.CurrentDomain.AssemblyResolve += RunTimeCurrentDomain.DefaultAssemblyResolve;
             }
         }
 
 
-        /// <summary>
-        /// 反射加载上下文,执行程序集
-        /// </summary> 
-        bool LoadFrom(string path,
-            ref FileAndDependentAssemblyList dlls,
-            ref Assembly asm,
-            ref bool addlies)
-        {
-            if (File.Exists(path))
-            {
-                dlls = new FileAndDependentAssemblyList(path, _sourceFile);
-                _sourceFile = path;
-                // 反射加载上下文,执行程序集
-                asm = Assembly.ReflectionOnlyLoadFrom(path);
-                addlies = true;
-                return false;
-            }
-            return true;
-        }
 
         /// <summary>
-        /// 加载依赖的dll
+        /// 返回的类型,描述加载的错误
         /// </summary>
-        public void Load()
+        public class LoadDllMessage
         {
-            LoadDependentAssemblyList(_dllFile);
+            public string Path;
+            public bool LoadYes;
+
+            public LoadDllMessage(string path, bool loadYes)
+            {
+                Path = path;
+                LoadYes = loadYes;
+            }
         }
 
         /// <summary>
-        /// 加载依赖的dll
+        /// 字节加载
         /// </summary>
-        /// <param name="path"></param>
-        /// <param name="assemblies"></param>
+        /// <param name="_dllFile"></param>
         /// <returns></returns>
-        void LoadDependentAssemblyList(string path)
+        public LoadDllMessage[] Load()
         {
-            Assembly asm = null;
-            // 路径 || 程序名
-            if ((path.IndexOf(Path.DirectorySeparatorChar, 0, path.Length) != -1) ||
-                (path.IndexOf(Path.AltDirectorySeparatorChar, 0, path.Length) != -1))
+            var loadYesList = new List<LoadDllMessage>();
+            if (!File.Exists(_dllFile))
             {
-                // 从这个路径加载程序集,路径 
-                asm = Assembly.Load(File.ReadAllBytes(path));
-            }
-            else if (_cadAppAssemblie.Count(c => c.FullName == path) == 0)
-            {
-                //判断cad程序集中是否存在,dll的依赖,不存在则搜索拖拉路径的dll,
-                //如果已经存在cad程序集上面就直接加载就可以了
-                //(cad程序集的依赖)和(加载的dll程序集的依赖)不一样,就加载,并加入集合,==0直接加载
-                var asdl = _assemblyName.Name + ".dll";
-                string path1 = Path.Combine(_location, asdl);
-                string path2 = Path.Combine(_loadPath, asdl);
-                //如果插件目录和拖拉目录都有,那么拖拉目录会覆盖前面
-                if (File.Exists(path2))
-                {
-                    // 从这个路径加载程序集,路径
-                    asm = Assembly.Load(File.ReadAllBytes(path2));
-                }
-                else if (File.Exists(path1))
-                {
-                    // 从这个路径加载程序集,路径 
-                    asm = Assembly.Load(File.ReadAllBytes(path1));
-                }
+                return loadYesList.ToArray();
             }
 
-            if (asm == null)
+            //查询加载链之后再逆向加载,确保前面不丢失
+            var allRefs = GetAllRefPaths(_dllFile);
+            allRefs.Reverse();
+
+            foreach (var path in allRefs)
             {
-                return;
+                //路径转程序集名
+                string assName = AssemblyName.GetAssemblyName(path).FullName;
+                //路径转程序集名
+                Assembly assembly = _cadAs.FirstOrDefault((Assembly a) => a.FullName == assName);
+                if (assembly == null)
+                {
+
+                    //为了实现debug时候出现断点,见链接
+                    // https://www.cnblogs.com/DasonKwok/p/10510218.html
+                    // https://www.cnblogs.com/DasonKwok/p/10523279.html
+
+                    //实现字节加载 
+                    var buffer = File.ReadAllBytes(path);
+#if DEBUG
+                    var dir = Path.GetDirectoryName(path);
+                    var pdbName = Path.GetFileNameWithoutExtension(path) + ".pdb";
+                    var pdbFullName = Path.Combine(dir, pdbName);
+                    if (File.Exists(pdbFullName))
+                    {
+                        var pdbbuffer = File.ReadAllBytes(pdbFullName);
+                        Assembly.Load(buffer, pdbbuffer);//就是这句会占用vs生成,可能这个问题是net strandard
+                    }
+                    else
+                    {
+                        Assembly.Load(buffer);
+                    }
+#else
+                    Assembly.Load(buffer);
+#endif   
+                    loadYesList.Add(new LoadDllMessage(path, true));//加载成功
+                }
+                else
+                {
+                    loadYesList.Add(new LoadDllMessage(path, false));//版本号没变不加载
+                }
+            }
+            return loadYesList.ToArray();
+        }
+
+
+        /// <summary>
+        /// 获取加载链
+        /// </summary>
+        /// <param name="dll"></param>
+        /// <param name="dlls"></param>
+        /// <returns></returns>
+        List<string> GetAllRefPaths(string dll, List<string> dlls = null)
+        {
+            dlls = dlls ?? new List<string>();
+            //如果含有 || 不存在文件
+            if (dlls.Contains(dll) || !File.Exists(dll))
+            {
+                return dlls;
+            }
+            dlls.Add(dll);
+
+            //路径转程序集名
+            string assName = AssemblyName.GetAssemblyName(dll).FullName;
+
+            //在当前程序域的assemblyAs内存区和assemblyAsRef映射区找这个程序集名
+            Assembly assemblyAs = _cadAs.FirstOrDefault((Assembly a) => a.FullName == assName);
+            Assembly assemblyAsRef;
+
+            //内存区有表示加载过
+            //映射区有表示查找过但没有加载(一般来说不存在.只是debug会注释掉Assembly.Load的时候用来测试)
+            if (assemblyAs != null)
+            {
+                assemblyAsRef = assemblyAs;
+            }
+            else
+            {
+                assemblyAsRef = _cadAsRef.FirstOrDefault((Assembly a) => a.FullName == assName);
+
+                //内存区和映射区都没有的话就把dll加载到映射区,用来找依赖表
+                assemblyAsRef = assemblyAsRef ?? Assembly.ReflectionOnlyLoad(File.ReadAllBytes(dll));
             }
 
-            // 遍历依赖(所有的引用)，并进行递归
-            var asms = asm.GetReferencedAssemblies();
-            foreach (AssemblyName item in asms)
+            //遍历依赖,如果存在dll拖拉加载目录就加入dlls集合
+            foreach (var assemblyName in assemblyAsRef.GetReferencedAssemblies())
             {
-                _assemblyName = item;
-                LoadDependentAssemblyList(item.FullName);
+                //dll拖拉加载路径-搜索路径(可以增加到这个dll下面的所有文件夹?)
+                string directoryName = Path.GetDirectoryName(dll);
+
+                var path = directoryName + "\\" + assemblyName.Name;
+                var paths = new string[]
+                {
+                    path + ".dll",
+                    path + ".exe"
+                };
+                foreach (var patha in paths)
+                {
+                    GetAllRefPaths(patha, dlls);
+                }
             }
+            return dlls;
         }
     }
 
@@ -272,5 +251,54 @@ namespace MyNetloadX
         [DllImport("version.dll", EntryPoint = "VerQueryValue", SetLastError = true)]
         private static extern bool VerQueryValue(IntPtr buffer, string subblock, ref IntPtr blockbuffer, ref int len);
 
+    }
+    public static class RunTimeCurrentDomain
+    {
+        #region  程序域运行事件 
+        // 动态编译要注意所有的引用外的dll的加载顺序
+        // cad2008若没有这个事件,会使动态命令执行时候无法引用当前的程序集函数
+        // 跨程序集反射
+        // 动态加载时,dll的地址会在系统的动态目录里,而它所处的程序集(运行域)是在动态目录里.
+        // netload会把所处的运行域给改到cad自己的,而动态编译不通过netload,所以要自己去改.
+        // 这相当于是dll注入的意思,只是动态编译的这个"dll"不存在实体,只是一段内存.
+
+        /// <summary>
+        /// 程序域运行事件
+        /// </summary>   
+        public static Assembly DefaultAssemblyResolve(object sender, ResolveEventArgs args)
+        {
+            var cad = AppDomain.CurrentDomain.GetAssemblies();
+
+#if false
+            /*获取名称一致,但是版本号不同的,调用最开始的版本*/
+            //获取执行程序集的参数
+             var ag = args.Name.Split(',')[0];
+            //获取 匹配符合条件的第一个或者默认的那个
+            // var load = cad.FirstOrDefault(a => a.GetName().FullName.Split(',')[0] == ag); 
+#endif
+
+            /*获取名称和版本号都一致的,调用它*/
+            Assembly load = null;
+            load = cad.FirstOrDefault(a => a.GetName().FullName == args.Name);
+            if (load == null)
+            {
+                /*获取名称一致,但是版本号不同的,调用最后的可用版本*/
+                var ag = args.Name.Split(',')[0];
+                //获取 最后一个符合条件的,
+                //否则a.dll引用b.dll函数的时候,b.dll修改重生成之后,加载进去会调用第一个版本的b.dll            
+                foreach (var item in cad)
+                {
+                    if (item.GetName().FullName.Split(',')[0] == ag)
+                    {
+                        //为什么加载的程序版本号最后要是*
+                        //因为vs会帮你迭代这个版本号,所以最后的可用就是循环到最后的.
+                        load = item;
+                    }
+                }
+            }
+
+            return load;
+        }
+        #endregion
     }
 }
